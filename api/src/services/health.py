@@ -1,11 +1,14 @@
-from sqlmodel import Session, text
+from src.config.db import Database
 
 
 class HealthService:
-    @staticmethod
-    def check_database(db: Session) -> dict[str, str]:
+    def __init__(self, database: Database) -> None:
+        self._database = database
+
+    def database_status(self) -> dict[str, str]:
         try:
-            db.exec(text("SELECT 1")).one()
-            return {"status": "healthy"}
+            self._database.ping()
         except Exception:
-            return {"status": "not_responding"}
+            return {"status": "not_ready", "database": "unavailable"}
+
+        return {"status": "ready", "database": "available"}

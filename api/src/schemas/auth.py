@@ -1,46 +1,64 @@
-from sqlmodel import SQLModel, Field
-from pydantic import EmailStr
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+from src.core.security import PrincipalType
 
 
-class UserBase(SQLModel):
-    username: str = Field(index=True, min_length=3, max_length=50)
-    email: EmailStr = Field(index=True)
+class TokenPairResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_at: datetime
 
 
-class UserCreateIn(SQLModel):
-    username: str = Field(min_length=3, max_length=50)
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=72)
+class AccessTokenResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    access_token: str
+    token_type: str = "bearer"
+    expires_at: datetime
+    scope: str = ""
 
 
-class UserCreateOut(SQLModel):
+class RefreshTokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    refresh_token: str = Field(min_length=20)
+
+
+class PermissionCode(str, Enum):
+    USERS_READ = "users:read"
+    USERS_WRITE = "users:write"
+    SERVICE_CLIENTS_READ = "service-clients:read"
+    SERVICE_CLIENTS_WRITE = "service-clients:write"
+    API_KEYS_WRITE = "api-keys:write"
+
+
+class UserPrincipal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    principal_type: PrincipalType = PrincipalType.USER
     id: int
     username: str
     email: EmailStr
+    permissions: set[str] = Field(default_factory=set)
 
 
-class UserRead(SQLModel):
-    id: int
-    username: str
-    email: EmailStr
+class ServicePrincipal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    principal_type: PrincipalType = PrincipalType.SERVICE
+    id: UUID
+    client_id: str
+    name: str
+    permissions: set[str] = Field(default_factory=set)
 
 
-class UserUpdateIn(SQLModel):
-    username: str | None = Field(default=None, min_length=3, max_length=50)
-    email: EmailStr | None = None
-    password: str | None = Field(default=None, min_length=8, max_length=72)
-
-
-class UserReplaceIn(SQLModel):
-    username: str = Field(min_length=3, max_length=50)
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=72)
-
-
-class Users(UserBase, table=True):
-    __table_args__ = {"schema": "accounts"}
-
-    id: int | None = Field(default=None, primary_key=True)
-    username: str = Field(index=True, unique=True)
-    email: EmailStr = Field(index=True, unique=True)
-    password_hash: str
+AuthenticatedPrincipal = UserPrincipal | ServicePrincipal

@@ -1,149 +1,87 @@
-from fastapi import APIRouter, HTTPException, status, Depends
-from fastapi.responses import JSONResponse, Response
-from fastapi.security import OAuth2PasswordRequestForm
 from typing import Annotated
-from src.integrations.dependencies import SessionDep
-from src.schemas.auth import Users, UserCreateIn, UserCreateOut, UserRead, UserUpdateIn, UserReplaceIn
-from src.services.auth import encode_token, Token
-from src.services.auth import hash_password, verify_password
-from sqlmodel import select
 
-auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
+from fastapi import APIRouter, Depends, Response, status
+from fastapi.security import OAuth2PasswordRequestForm
 
-@auth_router.get("/", response_model=UserRead)
-async def get_accounts(current_user:Token, db: SessionDep) -> list[UserRead]:
-    query = select(Users)
-    accounts = db.exec(query).all()
-    users = []
-    for account in accounts:
-        users.append(UserRead(
-            id=account.id, 
-            username=account.username, 
-            email=account.email))
-    
-    return users
+from src.core.errors import COMMON_ERROR_RESPONSES
+from src.dependencies.auth import CurrentPrincipalDep
+from src.dependencies.rate_limit import ClientTokenRateLimit, LoginRateLimit
+from src.dependencies.services import AuthenticationServiceDep, UserServiceDep
+from src.schemas.auth import (
+    AccessTokenResponse,
+    AuthenticatedPrincipal,
+    RefreshTokenRequest,
+    TokenPairResponse,
+)
+from src.schemas.forms import OAuth2ClientCredentialsForm
+from src.schemas.user import UserCreate, UserRead
 
-@auth_router.get("/me", response_model=UserRead)
-def profile(current_user:Token, ):
-    return current_user
 
-@auth_router.get("/{id}", response_model=UserRead)
-async def get_account(db: SessionDep, id: int) -> Users:
-    query = select(Users).where(Users.id == id)
-    account = db.exec(query).first()
-    if not account:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-        
-    return account.model_dump()
+auth_router = APIRouter(
+    prefix="/auth",
+    tags=["Authentication"],
+    responses=COMMON_ERROR_RESPONSES,
+)
 
-@auth_router.post("/signin", response_model=UserCreateOut, response_class=JSONResponse, status_code=status.HTTP_201_CREATED)
-async def register_user(user_in: UserCreateIn, db: SessionDep) -> UserCreateOut:
-    # Aquí puedes agregar la lógica para crear un nuevo usuario en la base de datos
-    
-    password_hash = hash_password(user_in.password)  
-    user = Users(
-        username=user_in.username,
-        email=user_in.email,
-        password_hash=password_hash 
-    )
 
-    #user = Users(**user_in.dict())  # Crea un nuevo usuario a partir del modelo de entrada
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    #return UserCreateOut(id=user.id, username=user.username, email=user.email)
-    return user.model_dump()
+@auth_router.post(
+    "/register",
+    response_model=UserRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def register(data: UserCreate, service: UserServiceDep) -> UserRead:
+    return service.create_user(data)
 
-@auth_router.put("/{id}", response_model=UserRead)
-async def replace_account(
-    db: SessionDep,
-    id: int,
-    user_in: UserReplaceIn,
-    current_user: Token
-):
-    account = db.get(Users, id)
 
-    if not account:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    account.username = user_in.username
-    account.email = user_in.email
-    account.password_hash = hash_password(user_in.password)
+@auth_router.post(
+    "/login",
+    response_model=TokenPairResponse,
+    dependencies=[Depends(LoginRateLimit())],
+)
+def login(
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    service: AuthenticationServiceDep,
+) -> TokenPairResponse:
+    return service.login(form_data.username, form_data.password)
 
-    db.add(account)
-    db.commit()
-    db.refresh(account)
 
-    return account
+@auth_router.post("/refresh", response_model=TokenPairResponse)
+def refresh(
+    data: RefreshTokenRequest,
+    service: AuthenticationServiceDep,
+) -> TokenPairResponse:
+    return service.refresh(data.refresh_token)
 
-@auth_router.patch("/{id}", response_model=UserRead)
-async def partial_update_account(
-    db: SessionDep, 
-    id: int, 
-    user_in: UserUpdateIn,
-    current_user: Token
-    ) -> Users:
-    query = select(Users).where(Users.id == id)
-    account = db.exec(query).first()
-    if not account:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )    # Actualiza los campos del usuario con los datos proporcionados
-    
-    update_data = user_in.model_dump(exclude_unset=True)  # PATCH: solo lo que llegó
-    
-    if "password" in update_data:
-        plain_password = update_data.pop("password")
-        update_data["password_hash"] = hash_password(plain_password)
 
-    for key, value in update_data.items():
-        setattr(account, key, value)
-    
-    db.add(account)
-    db.commit()
-    db.refresh(account)
-    return account.model_dump()
-
-@auth_router.delete("/{id}")#, status_code=status.HTTP_204_NO_CONTENT)
-async def delete_account(db: SessionDep, id: int) -> dict:
-    query = select(Users).where(Users.id == id)
-    account = db.exec(query).first()
-    if not account:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    db.delete(account)
-    db.commit()
+@auth_router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def logout(
+    data: RefreshTokenRequest,
+    service: AuthenticationServiceDep,
+) -> Response:
+    service.logout(data.refresh_token)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-@auth_router.post("/login")
-#async def login(user_in: UserCreateIn, db: SessionDep) -> str:
-async def login(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()], 
-    db: SessionDep,
-    ) -> dict:
-    query = select(Users).where(Users.username == form_data.username)
-    account = db.exec(query).first()
-    if not account or not verify_password(form_data.password, account.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
 
-    token = encode_token(account.id, account.username, account.email)
+@auth_router.post(
+    "/client-token",
+    response_model=AccessTokenResponse,
+    dependencies=[Depends(ClientTokenRateLimit())],
+)
+def client_token(
+    form_data: Annotated[OAuth2ClientCredentialsForm, Depends()],
+    service: AuthenticationServiceDep,
+) -> AccessTokenResponse:
+    return service.client_credentials(
+        client_id=form_data.client_id,
+        client_secret=form_data.client_secret,
+        requested_scopes=form_data.scopes,
+    )
 
-    return {"access_token": token}
+
+@auth_router.get("/me", response_model=AuthenticatedPrincipal)
+def profile(current_principal: CurrentPrincipalDep) -> AuthenticatedPrincipal:
+    return current_principal

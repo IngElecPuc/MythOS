@@ -1,68 +1,72 @@
-import argparse
-import os
+from __future__ import annotations
 
-import uvicorn
 from fastapi import FastAPI
-from sqlmodel import SQLModel
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="API Template")
-    parser.add_argument("--env", default="development")
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--reload", action="store_true")
-    return parser.parse_args()
+from src.config.config import Settings, get_settings
+from src.config.db import Database
+from src.core.exceptions import register_exception_handlers
+from src.core.logging import configure_logging
+from src.core.middleware import (
+    RequestContextMiddleware,
+    RequestSizeLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
+from src.core.rate_limit import InMemoryRateLimiter
+from src.endpoints.router import api_router
+from src.lifespan import build_lifespan
 
 
 class ApplicationFactory:
     @staticmethod
-    def create() -> FastAPI:
-        from src.config.config import get_settings
-        from src.core.exceptions import register_exception_handlers
-        from src.core.logging import configure_logging
-        from src.core.middleware import RequestLoggingMiddleware
-        from src.endpoints.auth import auth_router
-        from src.endpoints.health import health_router
-
-        settings = get_settings()
-        configure_logging()
+    def create(settings: Settings | None = None) -> FastAPI:
+        app_settings = settings or get_settings()
+        configure_logging(app_settings)
+        database = Database(app_settings)
 
         app = FastAPI(
-            title=settings.project_name,
-            version=settings.version,
+            title=app_settings.project_name,
+            description=app_settings.project_description,
+            version=app_settings.version,
+            debug=app_settings.debug,
+            lifespan=build_lifespan(database),
         )
-        app.add_middleware(RequestLoggingMiddleware)
-        register_exception_handlers(app)
-        app.include_router(auth_router)
-        app.include_router(health_router)
+        app.state.settings = app_settings
+        app.state.database = database
+        app.state.rate_limiter = InMemoryRateLimiter()
+
+        app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=app_settings.trusted_hosts,
+        )
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=app_settings.cors_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=[
+                "Authorization",
+                "Content-Type",
+                "X-API-Key",
+                "X-Request-ID",
+            ],
+            expose_headers=["X-Request-ID"],
+        )
+        app.add_middleware(
+            RequestSizeLimitMiddleware,
+            max_bytes=app_settings.max_request_body_bytes,
+        )
+        app.add_middleware(SecurityHeadersMiddleware)
+        app.add_middleware(RequestContextMiddleware)
+
+        register_exception_handlers(app, app_settings)
+        app.include_router(api_router)
         return app
 
 
-def create_app() -> FastAPI:
-    return ApplicationFactory.create()
+def create_app(settings: Settings | None = None) -> FastAPI:
+    return ApplicationFactory.create(settings)
 
 
-# Permite ejecutar: uvicorn src.main:app
 app = create_app()
-
-
-if __name__ == "__main__":
-    args = parse_args()
-    os.environ["APP_ENV"] = args.env
-
-    # Se limpia el singleton por si src.main fue importado antes de fijar APP_ENV.
-    from src.config.config import get_settings
-    get_settings.cache_clear()
-
-    runtime_app = create_app()
-
-    from src.config.db import get_database
-    SQLModel.metadata.create_all(get_database().engine)
-
-    uvicorn.run(
-        runtime_app,
-        host=args.host,
-        port=args.port,
-        reload=args.reload,
-    )

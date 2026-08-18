@@ -1,10 +1,15 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
+from fastapi.responses import JSONResponse
 
-from src.integrations.dependencies import SessionDep
-from src.services.health import HealthService
+from src.core.errors import COMMON_ERROR_RESPONSES
+from src.dependencies.services import HealthServiceDep
 
 
-health_router = APIRouter(prefix="/health", tags=["Health"])
+health_router = APIRouter(
+    prefix="/health",
+    tags=["Health"],
+    responses=COMMON_ERROR_RESPONSES,
+)
 
 
 @health_router.get("")
@@ -13,11 +18,11 @@ def health_check() -> dict[str, str]:
 
 
 @health_router.get("/db")
-def db_health(db: SessionDep) -> dict[str, str]:
-    health = HealthService.check_database(db)
-    if health["status"] != "healthy":
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=health,
-        )
-    return {"database": "ok"}
+def database_health(service: HealthServiceDep) -> JSONResponse:
+    result = service.database_status()
+    status_code = (
+        status.HTTP_200_OK
+        if result["status"] == "ready"
+        else status.HTTP_503_SERVICE_UNAVAILABLE
+    )
+    return JSONResponse(status_code=status_code, content=result)
