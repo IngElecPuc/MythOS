@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from src.config.config import Settings
-from src.config.db import Database
+from src.infrastructure.database import Database
 from src.core.rate_limit import InMemoryRateLimiter
 from src.core.security import (
     BcryptPasswordHasher,

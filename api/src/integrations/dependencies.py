@@ -1,13 +1,9 @@
-from typing import Annotated
+"""Importaciones de compatibilidad para dependencias de integraciones.
 
-from fastapi import Depends
-from sqlmodel import Session
+Las dependencias de base de datos tienen una única implementación canónica en
+``src.dependencies.database``.
+"""
 
-from src.config.db import get_database
+from src.dependencies.database import DatabaseDep, SessionDep
 
-
-def get_session():
-    yield from get_database().session()
-
-
-SessionDep = Annotated[Session, Depends(get_session)]
+__all__ = ["DatabaseDep", "SessionDep"]

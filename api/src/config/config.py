@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     database_max_overflow: int = Field(default=10, ge=0)
     database_pool_recycle_seconds: int = Field(default=1800, ge=60)
 
+    ollama_server: str = "localhost"
+    ollama_port: int = 11434
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_agent_model: str = "qwen3:8b-q4_K_M"
+    ollama_embedding_model: str = "embeddinggemma:latest"
+    ollama_timeout_seconds: float = Field(default=30.0, gt=0)
+    embedding_dim: int = 768
+
     jwt_secret: SecretStr
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = Field(default=30, ge=1, le=1440)

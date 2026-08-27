@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from src.config.config import Settings, get_settings
-from src.config.db import Database
+from src.infrastructure.database import Database
 from src.core.exceptions import register_exception_handlers
 from src.core.logging import configure_logging
 from src.core.middleware import (

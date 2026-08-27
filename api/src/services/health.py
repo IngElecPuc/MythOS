@@ -1,4 +1,4 @@
-from src.config.db import Database
+from src.infrastructure.database import Database
 
 
 class HealthService:

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from src.config.db import Database
+from src.infrastructure.database import Database
 
 logger = logging.getLogger(__name__)
 

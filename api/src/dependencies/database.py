@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlmodel import Session
 
-from src.config.db import Database
+from src.infrastructure.database import Database
 
 
 def get_database(request: Request) -> Database:
